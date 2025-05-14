@@ -1,0 +1,28 @@
+dataset_name: "mus"
+mode: "hypergraph"
+
+embedding_model_name: "models--BAAI--bge-m3" # "models--BAAI--bge-m3" "nvidia/NV-Embed-v2"
+rerank_model_name: "BAAI/bge-reranker-v2-m3"
+vdb_name: "milvus.db"
+batch_size: 128
+
+top_k: 3
+top_k_path: 5 # maintain topk paths in each depth
+top_k_chunk: 5 # use to retrieve topk relevent chunks in vallina and prune topk relevent chunks to answer question
+recall_k: 5
+
+use_vallina_rag: true
+use_rerank_final: true
+
+llm_model: "llama"
+llm_parallel_nums: 32
+gram: 3
+
+max_generation_token: 4000
+use_prompt: false # Indicate whether use prompt when embedding question or not, instead of generating answer
+
+select_topk_chunks: 5000
+
+entity_alignment_threshold: 0.85
+
+show_embedding_bar: false
