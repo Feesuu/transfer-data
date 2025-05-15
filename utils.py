@@ -431,22 +431,21 @@ def search(client, collection_name, query:list[list[float]], output_fields=None,
 def create_edge_collections(client, collection_name, dimension=1024):
     from pymilvus import MilvusClient, DataType
 
-    schema = MilvusClient.create_schema(auto_id=True, enable_dynamic_field=True)
+    schema = MilvusClient.create_schema(enable_dynamic_field=True)
     
     schema.add_field(
         field_name="id",
         datatype=DataType.VARCHAR,
         is_primary=True,
-        auto_id=True,
         max_length=100
     )
     
-    schema.add_field(
-        field_name="relation",
-        datatype=DataType.ARRAY,
-        element_type=DataType.VARCHAR,
-        max_capacity=3
-    )
+    # schema.add_field(
+    #     field_name="relation",
+    #     datatype=DataType.ARRAY,
+    #     element_type=DataType.VARCHAR,
+    #     max_capacity=3
+    # )
     
     schema.add_field(
         field_name="entity",
@@ -472,27 +471,21 @@ def create_edge_collections(client, collection_name, dimension=1024):
     
 def create_edge_collections_hyper(client, collection_name, dimension=1024):
     from pymilvus import MilvusClient, DataType
-    schema = MilvusClient.create_schema(auto_id=True, enable_dynamic_field=True)
+    schema = MilvusClient.create_schema(enable_dynamic_field=True)
     
     schema.add_field(
         field_name="id",
-        datatype=DataType.VARCHAR,
+        datatype=DataType.INT64,
         is_primary=True,
-        auto_id=True,
-        max_length=100
     )
     
-    schema.add_field(
-        field_name="relation",
-        datatype=DataType.VARCHAR,
-        max_length=300
-    )
     
     schema.add_field(
         field_name="entity",
         datatype=DataType.ARRAY,
         element_type=DataType.VARCHAR,
-        max_capacity=50
+        max_capacity=200,
+        max_length=150,
     )
     
     schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=dimension)
@@ -626,7 +619,7 @@ def add_eos(model, input_examples):
     input_examples = [input_example + model.tokenizer.eos_token for input_example in input_examples]
     return input_examples
 
-def find_top_k_index_hyper(client, collection_name, q_emb, path_set, already_find, filter, args):
+def find_top_k_index_hyper(client, collection_name, q_emb, path_set, edgeid2relation, filter, args):
     count = 0
     fold = 1
     return_keys = []
@@ -634,14 +627,16 @@ def find_top_k_index_hyper(client, collection_name, q_emb, path_set, already_fin
     
     while count < args.top_k:
         now_result = search(client=client, collection_name=collection_name, query=q_emb, 
-                            output_fields=["entity", "relation","vector"], top_k=args.top_k*fold, filter=filter)
+                            output_fields=["id","vector","entity"], top_k=args.top_k*fold, filter=filter)
         if last_result == now_result:
             break
         last_result = now_result
         now_result = now_result[0][args.top_k*(fold-1):]
         
         for item in now_result:
-            edge_key = item["entity"]["relation"]
+            edge_id = item["entity"]["id"]
+            #breakpoint()
+            edge_key = edgeid2relation[edge_id]
             if edge_key not in path_set:
                 next_entity = item["entity"]["entity"]
                 # breakpoint()
@@ -653,13 +648,13 @@ def find_top_k_index_hyper(client, collection_name, q_emb, path_set, already_fin
     
     return return_keys
 
-def find_neighbor_hyper(client, collection_name, model, model_rerank, already_find, origin_q, entity, next_q, path, args):
+def find_neighbor_hyper(client, collection_name, model, model_rerank, edgeid2relation, origin_q, entity, next_q, path, args):
     
     return_neighbor = []
     #q_emb = get_question_embedding(args, model, next_q)
     q_emb = next_q
     filter='ARRAY_CONTAINS(entity, "{}")'.format(entity)
-    relations_key = find_top_k_index_hyper(client, collection_name, q_emb, set(path), already_find, filter, args)
+    relations_key = find_top_k_index_hyper(client, collection_name, q_emb, set(path), edgeid2relation, filter, args)
     
     # if entity == "southeast library":
     #     breakpoint()
@@ -693,17 +688,17 @@ def find_neighbor_hyper(client, collection_name, model, model_rerank, already_fi
     return return_neighbor
 
 
-def expand_one_layer_hyper(client, collection_name, queue, model, model_rerank, already_find, origin_q, args):
+def expand_one_layer_hyper(client, collection_name, queue, model, model_rerank, edgeid2relation, origin_q, args):
     next_queue = []
     sorted_candidate = []
     while queue:
         entity, next_q, path  = queue.popleft()
         path = list(path)
-        return_neighbor = find_neighbor_hyper(client, collection_name, model, model_rerank, already_find, origin_q, entity, next_q, path, args)
+        return_neighbor = find_neighbor_hyper(client, collection_name, model, model_rerank, edgeid2relation, origin_q, entity, next_q, path, args)
         next_queue.extend(return_neighbor)
     
     if next_queue:
-        next_queue, sorted_candidate = choose_top_k_next_candidate(next_queue, already_find, model_rerank, args)
+        next_queue, sorted_candidate = choose_top_k_next_candidate(next_queue, edgeid2relation, model_rerank, args)
     
     return next_queue, sorted_candidate
 
@@ -932,8 +927,6 @@ def get_propositions_by_llm(args):
     f.close()
     save_path = f'./data/{args.dataset_name}/{args.folder_name}/Corpus_proposition.json'
     
-    
-    
     if not os.path.exists(f'./data/{args.dataset_name}/{args.folder_name}/chunks_choices.json'):
         chunks_score, chunks_cost = select_chunk(questions, candidates_text, args)
         
@@ -1059,13 +1052,15 @@ def index(args):
         edge_count = 0
         
         entity_text = []
+        edgeid2relation = {}
         for chunkid, propositions_dict in chunkid2propositions.items():
             for key, value in propositions_dict.items():
                 entity_list = [clean_str(key) for key, item in value.items() if item != "DATE"]
                 entity = list(map(lambda x: clean_str(x), value))
                 edge_dict = {
-                    "id": edge_count, "relation": key, "entity": entity
+                    "id": edge_count, "entity": entity
                 }
+                edgeid2relation[edge_count] = key
                 entity_text.extend(entity_list)
                 edge_count += 1
                 edge_data.append(edge_dict)
@@ -1108,7 +1103,7 @@ def index(args):
         batch_insert(client=client, collection_name="entity_collection", data=entity_data, BATCH_SIZE=1024)   
         
         with gzip.open(f'./data/{args.dataset_name}/{args.folder_name}/rkey2cid.pkl.gz', "wb") as f:
-            pickle.dump(rkey2cid, f)
+            pickle.dump((rkey2cid, edgeid2relation), f)
             
     print("Finish Index...")
     
@@ -1147,7 +1142,7 @@ def hyper_graph(args):
     
     model = get_embedding_model(args.embedding_model_name)
     model_rerank = get_rerank_model(args.rerank_model_name)
-    rkey2cid = load_gzipped_pickle(f'./data/{args.dataset_name}/{args.folder_name}/rkey2cid.pkl.gz')
+    rkey2cid, edgeid2relation = load_gzipped_pickle(f'./data/{args.dataset_name}/{args.folder_name}/rkey2cid.pkl.gz')
     cid_2_context = load_context(args)
     qid_2_entity = load_extract_entity(args)
     questions_list = load_question(args)
@@ -1159,7 +1154,7 @@ def hyper_graph(args):
         #     continue
         # breakpoint()
         question_emb = get_question_embedding(args, model, question)
-        relevent_edges = search(client, "edge_collection", question_emb, ["relation", "entity"], args.top_k)
+        relevent_edges = search(client, "edge_collection", question_emb, ["entity"], args.top_k)
         relevent_edges = relevent_edges[0]
         
         link_entities = []
@@ -1179,11 +1174,10 @@ def hyper_graph(args):
             list(zip(link_entities, [question_emb for _ in range(len(link_entities))], [[] for _ in range(len(link_entities))]))
         )
         depth = 0
-        already_find = defaultdict(str)
         all_items = []
         # breakpoint()
         while depth < 3:
-            queue, items = expand_one_layer_hyper(client, "edge_collection", queue, model, model_rerank, already_find, question, args)
+            queue, items = expand_one_layer_hyper(client, "edge_collection", queue, model, model_rerank, edgeid2relation, question, args)
             all_items.extend(items)
             depth += 1
             

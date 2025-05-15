@@ -16,9 +16,9 @@ for i in "${!subfolder_list[@]}"; do
     # echo "Processing the sub-folder $i..."
     # source /home/yaodong/miniconda3/bin/activate /home/yaodong/miniconda3/envs/gnnrag
     # CUDA_VISIBLE_DEVICES="$my_gpu" python main.py --config_path "$config_path" --folder_name "${subfolder_list[$i]}" --step 0
-    source /home/yaodong/miniconda3/bin/activate /home/yaodong/miniconda3/envs/copy
-    CUDA_VISIBLE_DEVICES="$my_gpu" python main.py --config_path "$config_path" --folder_name "${subfolder_list[$i]}" --step 1
-    source /home/yaodong/miniconda3/bin/activate /home/yaodong/miniconda3/envs/gnnrag
+    # source /home/yaodong/miniconda3/bin/activate /home/yaodong/miniconda3/envs/copy
+    # CUDA_VISIBLE_DEVICES="$my_gpu" python main.py --config_path "$config_path" --folder_name "${subfolder_list[$i]}" --step 1
+    # source /home/yaodong/miniconda3/bin/activate /home/yaodong/miniconda3/envs/gnnrag
     CUDA_VISIBLE_DEVICES="$my_gpu" python main.py --config_path "$config_path" --folder_name "${subfolder_list[$i]}" --step 2
     CUDA_VISIBLE_DEVICES="$my_gpu" python main.py --config_path "$config_path" --folder_name "${subfolder_list[$i]}" --step 3
     CUDA_VISIBLE_DEVICES="$my_gpu" python main.py --config_path "$config_path" --folder_name "${subfolder_list[$i]}" --step 4
